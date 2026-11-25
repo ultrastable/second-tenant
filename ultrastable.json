@@ -1,5 +1,29 @@
 {
   "$schema_version": "0.1.0",
+  "identity": {
+    "name": "second-tenant",
+    "slug": "second-tenant",
+    "summary": "The first system started from the kernel with no code agent: proof that seed/ alone boots, deploys and runs a system.",
+    "repo": "ultrastable/second-tenant",
+    "public_url": "https://ultrastable-seed-second-tenant.ultrastable.workers.dev",
+    "license": "LicenseRef-Ultrastable-USL-1.0",
+    "topics": [
+      "ultrastable"
+    ],
+    "layer": "seeded-system",
+    "parent": "ultrastable/ultrastable",
+    "visibility": "public",
+    "visibility_reason": "DISCOVER-1: public by default",
+    "status": "live",
+    "runs_as": [
+      {
+        "provider": "cloudflare",
+        "kind": "worker",
+        "name": "ultrastable-seed-second-tenant",
+        "how": "built from the Ultrastable seed and deployed by the platform's seed deploy"
+      }
+    ]
+  },
   "runtime": {
     "provider": "cloudflare",
     "worker_name": "{slug}-ultrastable",
