@@ -2,12 +2,15 @@
 
 The protocol for every agent in this repo is in [`agents/AGENTS.md`](agents/AGENTS.md). Read it first, then your role file in [`agents/roles/`](agents/roles/). Limits: [`autonomy/policy.json`](autonomy/policy.json).
 
-> CLOSED-LOOP-AXIOM: Every loop is closed by the system itself. No step depends on a person reading, deciding, reviewing or approving, and nothing is ever assumed to be read. Every output has a code consumer (registered in doctrine/consumers.json). Every open item has an automatic owner, trigger and probe. A credential only the owner can mint becomes an automated acquisition attempt across every surface plus a staged default in effect, never a document or a card. A document, memory or note that no code consumes is not produced. Enforced by `python3 -m foundation closedloop --check` (doctrine/closed-loop.json).
+## Build and test
 
-> BOUNDARY-AXIOM: Inside the boundary the system creates and destroys at will, because everything inside is rebuilt from the repository (python3 -m foundation boundary --drill). Only egress crosses the boundary: credentials, money, the owner's accounts, public publishing, other people's systems. Egress keeps its gate and its staged default. Trust widens what an agent may do inside, never what it may do at egress, never harness permissions, secrets or the interrupt gate. (doctrine/boundary.json, enforced by `python3 -m foundation boundary --check`.)
+Run these from the repository root before you open a pull request.
 
-> AGENT-CONSUMPTION: code is written to be read by agents as well as run. Public surfaces serve Link headers, llms.txt, an OpenAPI description, an API catalog, an MCP server card and a read-only MCP server (site/agentic.js); every endpoint has a stable operationId, errors are JSON with a machine-readable code, and no behaviour is explained only in prose. Standards and their status: doctrine/agent-standards.json (`python3 -m foundation agentstd --check`).
+- `python3 -m unittest discover -s tests`: the Python tests.
+- `cd worker && npm test`: the Worker's tests.
+- `python3 scripts/check_readmes.py`: the READMEs agree with the code.
 
-> TERMS-CROSSWALK: autonomous, automatic and unattended name one property (glossary `unattended`, `autonomy`): the loop runs on a clock or event on server-side infrastructure, closes itself and does not stop at an error. Say autonomous for a system, closed loop for one loop, unattended for the measure (merged work with no session driving it). Do not use never-terminating, non-terminating, hands-off, set-and-forget, or report a PR as waiting for review: a green PR merges itself (`python3 -m foundation lanewatch --check` fails when one does not). Map and avoided words: doctrine/crosswalk.json (`python3 -m foundation crosswalk --check`).
+## Rules
 
-> CODE-ONLY-ORDER (Rowan, 2026-11-16): chat threads, sessions and reports are temporary and are never storage. Every decision, instruction and standing rule lives in the system itself as code the system consumes: the seed, agent instructions, doctrine and policy files, checks and loops. A rule that exists only in a thread or a report does not count. Agents decide on their own, implement, deploy to production and verify live; they never present a decision to the owner. A merged change that records a decision with no code consumer, or an agent report that hands a decision to the owner, fails a check and files a work item. Enforced by `python3 -m foundation standingorder --check` (doctrine/standing-order.json); every tenant bootstrapped from the seed inherits it.
+- Every standing rule in full, including the axioms (closed loop, boundary, agent consumption, terms, code-only order): [`agents/AGENTS.md`](agents/AGENTS.md).
+- Hard limits: never print or commit a secret; do not weaken a check to make it pass; the only pause is the interrupt gate described there.
