@@ -4,13 +4,15 @@
 // For each open PR on a client branch: refresh a stale branch, merge when green, and once it is older than maxAgeH file one tracked item (Q-OPENLOOP-<repo>-<n>) with owner, trigger and probe.
 // For each issue still labelled claimed/dispatched past maxAgeH: release the claim so the executor re-takes it. Returns open_loop_age_hours, the probe value (target 0).
 import { notGreen } from './greenguard.js';
+import { ghFetch, mergedAnyway } from './ghfetch.js';  // GH-RETRY-1
 import { reconcile, makeGh, latency } from './mergenow.js';
 import { prTier, portItemId } from './sla.js';  // SLA-1
+import { safeClose } from './prsafe.js';  // PR-NEVER-LOSE-1
 const API = 'https://api.github.com';
 // BRANCH-ROOT-CAUSE-1: `worker/` branches (the Worker executor's own PRs) were never swept, so they sat blocked; every automation prefix is swept.
 const CLIENT_PREFIX = ['claude/', 'agent/', 'worker/', 'parked/', 'dependabot/'];  // PARKED-PR-1: the branch reaper parks as parked/<name> and the completion sweep opens a PR for it; without this prefix those PRs had no clock (23 overdue, fleet red every 10 min).  // DEP-LOOP-1: dependency updates merge on green like any client PR (GREEN-GUARD-1 applies)
 export async function gh(f, token, method, path, body) {
-  const r = await f(API + path, { method, headers: { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json', 'user-agent': 'ultrastable-sweeper', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const r = await ghFetch(f, API + path, { method, headers: { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json', 'user-agent': 'ultrastable-sweeper', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   const t = await r.text();
   // Not a throw: every caller reads ok/status and records a failure in out.errors (sweeper_runs.errors), so nothing is silent,
   // and a 410 (issues off) or 405 (merge refused) is an expected answer that must not abort the rest of the sweep.
@@ -47,9 +49,8 @@ export async function sweepOpenLoops({ token, repos = [], fetch: f = fetch, now 
           else {
             out.errors.push(`${tag} ${r.result}${r.why ? ' ' + r.why : ''}`);
             if ((d.head && d.head.ref || '').startsWith('agent/') && hours(p.created_at || p.updated_at, now) * 60 > stallMin) {
-              await gh(f, token, 'POST', `/repos/${repo}/issues/${p.number}/comments`, { body: 'STALL-ACT-1: conflicts with main that the server cannot reconcile after the stall limit. Superseded: the executor refiles the item from current main.' });
-              const c = await gh(f, token, 'PATCH', `/repos/${repo}/pulls/${p.number}`, { state: 'closed' });
-              if (c.ok) (out.superseded ||= []).push(tag);
+              const c = await safeClose((m, path, b) => gh(f, token, m, path, b), repo, p.number, 'STALL-ACT-1: conflicts with main that the server cannot reconcile after the stall limit');  // PR-NEVER-LOSE-1
+              if (c.closed) (out.superseded ||= []).push(tag); else out.held = [...(out.held || []), `${tag} ${c.reason}`];
             }
           }
         }
@@ -60,21 +61,25 @@ export async function sweepOpenLoops({ token, repos = [], fetch: f = fetch, now 
           const cr = await gh(f, token, 'GET', `/repos/${repo}/commits/${d.head.sha}/check-runs?per_page=1`);
           if (cr.ok && cr.json && cr.json.total_count === 0) {
             const c1 = await gh(f, token, 'PATCH', `/repos/${repo}/pulls/${p.number}`, { state: 'closed' });
-            const c2 = c1.ok ? await gh(f, token, 'PATCH', `/repos/${repo}/pulls/${p.number}`, { state: 'open' }) : c1;
+            let c2 = c1.ok ? await gh(f, token, 'PATCH', `/repos/${repo}/pulls/${p.number}`, { state: 'open' }) : c1;
+            for (let i = 0; c1.ok && !c2.ok && i < 3; i++) c2 = await gh(f, token, 'PATCH', `/repos/${repo}/pulls/${p.number}`, { state: 'open' });  // PR-NEVER-LOSE-1: a failed reopen is retried, never left closed
             (c2.ok ? (out.retriggered ||= []) : out.errors).push(c2.ok ? tag : `${tag} retrigger ${c2.status}`);
           }
         }
         // SLA-1: the written ladder (doctrine/sla.json). Past hard_min and idle, a PR that is not merge-ready is superseded whatever its branch prefix (STALL-ACT-1 covered agent/ only,
         // so claude/ PRs that conflicted or failed sat for hours). The branch is kept and one PORT-BRANCH item carries it onto main: nothing is lost.
         if (!(out.retriggered || []).includes(tag) && !(out.superseded || []).includes(tag) && prTier({ ageMin: hours(p.created_at || p.updated_at, now) * 60, idleMin: hours(p.updated_at || p.created_at, now) * 60, state: d.mergeable_state, branch: d.head && d.head.ref }) === 'supersede') {
-          await gh(f, token, 'POST', `/repos/${repo}/issues/${p.number}/comments`, { body: 'SLA-1: open past the written limit (doctrine/sla.json) and not merge-ready. Superseded: the branch is kept and queue item ' + portItemId(d.head.ref) + ' carries it onto current main.' });
-          const c = await gh(f, token, 'PATCH', `/repos/${repo}/pulls/${p.number}`, { state: 'closed' });
-          if (c.ok) { (out.superseded ||= []).push(tag); (out.sla_ported ||= []).push({ repo, number: p.number, branch: d.head.ref }); continue; }
+          const c = await safeClose((m, path, b) => gh(f, token, m, path, b), repo, p.number, 'SLA-1: open past the written limit (doctrine/sla.json) and not merge-ready; queue item ' + portItemId(d.head.ref) + ' carries it onto current main');  // PR-NEVER-LOSE-1
+          if (c.closed) { (out.superseded ||= []).push(tag); (out.sla_ported ||= []).push({ repo, number: p.number, branch: d.head.ref }); continue; }
+          out.held = [...(out.held || []), `${tag} ${c.reason}`];
         }
-        const hold = d.mergeable_state === 'clean' ? await notGreen(f, token, repo, d.head && d.head.sha, (ff, t, m, path) => gh(ff, t, m, path)) : null;  // GREEN-GUARD-1
+        // HOLD-LABEL-1 (US-33-R13): a pull request labelled `hold` is never merged here; it keeps its clock and its open-loop item below
+        const labelled = [...((d && d.labels) || []), ...(p.labels || [])].some(l => l && l.name === 'hold');
+        const hold = labelled ? 'hold' : d.mergeable_state === 'clean' ? await notGreen(f, token, repo, d.head && d.head.sha, (ff, t, m, path) => gh(ff, t, m, path)) : null;  // GREEN-GUARD-1
         if (hold) out.held = [...(out.held || []), `${tag} ${hold}`];
         if (d.mergeable_state === 'clean' && !hold) {
           const m = await gh(f, token, 'PUT', `/repos/${repo}/pulls/${p.number}/merge`, { merge_method: 'squash' });
+          if (!m.ok && await mergedAnyway((mm, pp) => gh(f, token, mm, pp), repo, p.number, m.status)) m.ok = true;  // GH-RETRY-1
           if (m.ok) { out.merged.push(tag); continue; }
         }
         const age = hours(p.updated_at || p.created_at, now);
@@ -119,7 +124,7 @@ export async function recordSweep(db, out, at = new Date().toISOString().replace
     for (const c of PR_LATENCY_DDL) await db.prepare(c).run().catch(x => { if (!/duplicate column/i.test(String(x && x.message))) throw x; });
     await ins();
   }
-  await db.prepare(`DELETE FROM sweeper_runs WHERE id NOT IN (SELECT id FROM sweeper_runs ORDER BY id DESC LIMIT 500)`).run();
+  await db.prepare(`DELETE FROM sweeper_runs WHERE id <= (SELECT MAX(id) FROM sweeper_runs) - 500`).run();  // READ-BUDGET-9: a primary-key range, not NOT IN over the whole table (1,003 rows a run, measured); ids only grow, so at most the newest 500 stay
 }
 export async function lastSweep(db) { return (await db.prepare(`SELECT at, status, merged, filed, released, errors, open_loop_age_hours, merge_p50_min, merge_p95_min, oldest_open_pr_min, stalled_prs FROM sweeper_runs ORDER BY id DESC LIMIT 1`).first()) || null; }
 
