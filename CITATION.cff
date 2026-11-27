@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it as below."
+type: software
+authors:
+  - name: "Rowan Brad Quni-Gudzinas"
+title: "second-tenant"
+abstract: "The first system started from the kernel with no code agent: proof that seed/ alone boots, deploys and runs a system."
+repository-code: "https://github.com/ultrastable/second-tenant"
+license-url: "https://github.com/ultrastable/second-tenant/blob/main/LICENSE"
+url: "https://ultrastable-seed-second-tenant.ultrastable.workers.dev"

@@ -1,0 +1,19 @@
+{
+ "repo": "ultrastable/second-tenant",
+ "description": "The first system started from the kernel with no code agent: proof that seed/ alone boots, deploys and runs a system.",
+ "homepage": "https://ultrastable-seed-second-tenant.ultrastable.workers.dev",
+ "topics": [
+  "ultrastable"
+ ],
+ "settings": {
+  "has_wiki": false,
+  "allow_squash_merge": true,
+  "allow_merge_commit": false,
+  "allow_rebase_merge": false,
+  "allow_auto_merge": true,
+  "allow_update_branch": true,
+  "delete_branch_on_merge": true,
+  "private": false,
+  "is_template": false
+ }
+}
